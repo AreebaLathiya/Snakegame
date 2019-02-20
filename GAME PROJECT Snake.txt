@@ -1,0 +1,580 @@
+.model small
+.data
+
+mode db                 03h  
+colorchanger db         45h
+startPosX db            39
+startPosY db            12
+myChar db               14
+wdir db                 119, 48h, 87
+sdir db                 115, 50h, 83
+adir db                 97, 4bh, 65
+ddir db                 100, 4dh, 68
+curColor db             12h
+cycle db                0
+startPrompt db          'Press any key to start the game ', '$'
+index dw              0
+recycleTime EQU         100
+maxX dw                 80
+maxY dw                 25
+food db                 01h
+prevkey    db           ?
+input db                ?
+xpos db                 ?
+ypos db                 ?
+foodPosX db             ?
+foodPosY db             ?
+cloneXpos db            ?
+cloneYpos db            ?
+snakeLength db          5
+partCount   db          1
+curPage db              0
+altPage db              1
+cloneAltPage db         ?
+boolCopied db           0
+upChar db               '^'
+downChar db             'v'
+leftChar db             '<'
+rightChar db            '>'
+promptRetry db 'Want to play again?', '$'
+choices db 'Yes       No', '$'
+promptTY db 'Thank you for playing! n___n', '$'
+arrowSelect db 16
+mychoice db 'y'
+.stack 100h
+.code
+
+loadPage macro page
+    mov al, page
+    mov ah, 05h
+    int 10h
+endm
+shifting macro colorchanger
+    rol colorchanger,1
+    ret
+endm
+
+screenchange macro colorchanger 
+       MOV AH,06H ;request scroll ; clears screen
+MOV AL,00H ;full screen
+MOV BH,colorchanger ; set attribute, color idher change hoga
+MOV CX,0000 ;top left corner
+MOV DX,184FH ;bottom right corner of box
+INT 10H ; interrupt call
+    endm
+setCursorPos macro x, y, page
+    mov dh, y
+    mov dl, x
+    mov bh, page
+    mov ah, 02h
+    int 10h
+endm
+
+printChar macro char, color, page
+    mov al, char
+    mov bh, page
+    mov bl, color
+    xor cx, cx
+    mov cx, 1
+    mov ah, 09h
+    int 10h
+endm
+
+loadPrompts proc
+    call clearScreen
+    call clearRegisters
+    setCursorPos 30, 12, curPage
+    lea dx, promptRetry
+    mov ah, 09h
+    int 21h
+
+    setCursorPos 34, 13, curPage
+    lea dx, choices
+    mov ah, 09h
+    int 21h
+    ret
+loadPrompts endp
+
+printArrow proc
+    setCursorPos xpos, ypos, curPage
+    printChar arrowSelect, 0fh, curPage
+    ret
+printArrow endp
+
+loadTYPrompt proc
+    call clearscreen
+    call clearRegisters
+    mov xpos, 26
+
+    setCursorPos xpos, 12, curPage
+    lea dx, promptTY
+    mov ah, 09h
+    int 21h
+
+    mov ah, 00h
+    int 16h
+
+    call clearScreen
+
+    mov ax, 4c00h
+    int 21h
+    ret
+loadTYPrompt endp
+
+copy macro dest, source
+    mov cl, source
+    mov dest, cl
+endm
+
+gameover proc
+    call clearScreen
+    call loadPrompts
+    setCursorPos 32, 13, curPage
+    printChar arrowSelect, 0fh, curPage
+
+    choose:
+    mov ah, 00h
+    int 16h
+    mov input, al
+    cmp al, 'a'
+    je chooseYes
+    cmp al, 'd'
+    je chooseNo
+
+    jmp done
+
+    chooseYes:
+    mov mychoice, 'y'
+    mov xpos, 32
+    mov ypos, 13
+    jmp done
+
+    chooseNo:
+    mov mychoice, 'n'
+    mov xpos, 42
+    mov ypos, 13
+
+    done:
+    call clearScreen
+    call loadPrompts
+    call printArrow
+    cmp input, 13
+    jne choose
+
+    cmp mychoice, 'y'
+    je playagain
+
+    call loadTYPrompt
+
+    playagain:
+    call clearRegisters
+    mov snakeLength, 5
+    mov partCount, 1
+    loadPage altPage
+    copy cloneAltPage, altPage
+    copy altPage, curPage
+    copy curPage, cloneAltPage
+    mov boolCopied, 0
+    mov input, 'd'
+    mov prevkey, 'd'
+    ret
+gameover endp
+
+random macro maxCoor
+    mov ah, 00h     
+    int 1ah         
+
+    mov  ax, dx
+    xor  dx, dx
+    mov  cx, maxCoor     
+    div  cx         
+endm
+
+scanChar proc
+    mov ah, 08h
+    int 10h
+    ret
+scanChar endp  
+
+
+
+
+keystroke proc
+    mov ah, 01h
+    int 16h
+    jz nopress
+
+    mov ah, 00h
+    int 16h
+
+    cmp al, 00h
+    jne wsadInput
+
+    mov input, ah
+    jmp nopress
+
+    wsadInput:
+    mov input, al
+    nopress:
+    ret
+keystroke endp
+
+spawnfood proc  
+      
+    cmp cycle, 0
+    jne setFood
+
+    setFoodPos: 
+    random maxX
+    mov foodPosX, dl
+    random maxY
+    mov foodPosY, dl
+
+    setFood:
+    setCursorPos foodPosX, foodPosY, curPage
+    mov ah, 08h
+    int 10h
+
+    cmp ah, 12h
+    je setFoodPos
+
+    spawn:
+    printChar food, 0fh, curPage 
+         shifting colorchanger
+    ret
+spawnfood endp
+
+waitAmillisec proc
+    mov cx, 1h
+    mov dx, 0f4h
+    mov ah, 86h
+    int 15h
+    inc cycle
+    cmp cycle, recycleTime
+    jle proceed
+
+    mov cycle, 0
+
+    proceed:
+    ret
+waitAmillisec endp
+
+clearRegisters proc
+    xor ax, ax
+    xor bx, bx
+    xor cx, cx
+    xor dx, dx
+    ret
+clearRegisters endp
+
+clearScreen proc
+   ; mov ax, 0600h
+   ; mov bh, 07h
+   ; xor cx, cx
+   ; mov dx, 184fh
+   ; int 10h
+    screenchange colorchanger
+    ret
+clearScreen endp
+
+initgraphics proc
+    
+    mov al,mode         
+    mov ah,00                 
+    int 10h              
+    ret
+initgraphics endp
+
+closegraphics proc
+    mov ax, 0003h      
+    int 10h
+    ret
+closegraphics endp
+
+main    proc
+
+mov ax, @data
+mov ds, ax
+
+call initgraphics
+
+mov cx, 3200h
+mov ah, 01h
+int 10h
+
+setCursorPos 22, 12, curPage
+lea dx, startPrompt
+mov ah, 09h
+int 21h
+
+mov ah, 00h
+int 16h
+
+mov input, 'd'
+mov prevkey, 'd'
+call clearScreen
+
+gameStart:
+setCursorPos startPosX, startPosY, curPage
+mov xpos, dl
+mov ypos, dh
+
+start:
+printChar myChar, curColor, curPage
+inc xpos
+setCursorPos xpos, ypos, curPage
+inc partCount
+mov cl, partCount
+cmp cl, snakeLength
+jle start
+
+dec xpos
+mov partCount, 1
+
+readchar:
+call keystroke
+
+mov index, 0
+call clearRegisters
+
+cmpDir:
+mov bx, index
+mov al, input
+cmp al, [ddir+bx]
+je moveright
+cmp al, [wdir+bx]
+je moveup
+cmp al, [sdir+bx]
+je movedown
+cmp al, [adir+bx]
+je moveleft
+inc index
+cmp index, 3
+jl cmpDir
+
+mov index, 0
+copy input, prevkey
+jmp cmpDir
+
+moveup:  
+       
+    cmp prevkey, 's'
+    je movedown
+
+    mov prevkey, 'w' 
+    moveup_draw:
+    copy mychar, upChar
+    cmp ypos, 0
+    jne up
+
+    mov ypos, 24
+    copy cloneYPos, snakeLength
+    jmp keepmoving
+
+    up:
+    dec ypos
+    jmp keepmoving
+
+movedown:
+    cmp prevkey, 'w'
+    je moveup
+
+    mov prevkey, 's' 
+    movedown_draw:
+    copy mychar, downChar
+    cmp ypos, 24
+    jne down
+
+    mov ypos, 0
+    copy cloneYPos, snakeLength
+    jmp keepmoving
+
+    down:
+    inc ypos
+    jmp keepmoving
+
+moveleft:
+    cmp prevkey, 'd'
+    je moveright
+
+    mov prevkey, 'a' 
+    moveleft_draw:
+    copy mychar, leftChar
+    cmp xpos, 0
+    jne left
+
+    mov xpos, 79
+    mov cl, snakeLength
+    copy cloneXPos, xpos
+    sub cloneXPos, cl
+    jmp keepmoving
+
+    left:
+    dec xpos
+    jmp keepmoving
+
+moveright:
+    cmp prevkey, 'a'
+    je moveleft
+
+    mov prevkey, 'd' 
+    moveright_draw:
+    copy mychar, rightChar
+    cmp xpos, 79
+    jne right
+
+    mov xpos, 0
+    copy cloneXPos, snakeLength
+    jmp keepmoving
+
+    right:
+    inc xpos
+
+keepmoving:  
+
+    call spawnfood 
+  
+    setCursorPos xpos, ypos, altPage
+
+    call scanChar
+    cmp ah, curColor
+    jne notDeads
+
+    call gameOver
+    jmp gameStart
+
+    notDeads:
+    printChar myChar, curColor, altPage
+
+    mov cl, xpos
+    cmp cl, foodPosX
+    jne copyHeadPos
+
+    mov cl, ypos
+    cmp cl, foodPosY
+    jne copyHeadPos
+
+    add snakeLength, 2
+    mov cycle, 0
+
+    copyHeadPos:
+    cmp boolCopied, 0
+    jne keeplooking
+
+    copy cloneXPos, xpos
+    copy cloneYPos, ypos
+    mov boolCopied, 1
+
+    keepLooking:
+    mov cl, partCount
+    printbody:
+        cmp cl, snakeLength
+        je move
+        call scanChar
+       cmp al, rightChar
+        je checkForRightPart
+        cmp al, upChar
+        je checkForUpPart
+        cmp al, downChar
+        je checkForDownPart
+        cmp al, leftChar
+        je checkForLeftPart
+
+        checkForUpPart:
+            cmp ypos, 24
+            jne goUp
+
+            mov ypos, 0
+            jmp checkPrevChar
+
+            goUp:
+            inc ypos
+        jmp checkPrevChar
+
+        checkForDownPart:
+            cmp ypos, 0
+            jne goDown
+
+            mov ypos, 24
+            jmp checkPrevChar
+
+            goDown:
+            dec ypos
+        jmp checkPrevChar
+
+        checkForLeftPart:
+            cmp xpos, 79
+            jne goLeft
+
+            mov xpos, 0
+            jmp checkPrevChar
+
+            goLeft:
+            inc xpos
+        jmp checkPrevChar
+
+        checkForRightPart:
+            cmp xpos, 0
+            jne goRight
+
+            mov xpos, 79
+            jmp checkPrevChar
+
+            goRight:
+            dec xpos
+
+        checkPrevChar:
+        setCursorPos xpos, ypos, curPage
+        mov ah, 08h
+        int 10h
+        inc partCount
+        mov cl, partCount
+        cmp cl, snakeLength
+        jg move 
+        cmp al, rightChar
+        je printRight
+        cmp al, upChar
+        je printUp
+        cmp al, downChar
+        je printDown
+        cmp al, leftChar
+        je printLeft
+
+        jmp move
+
+        printUp:
+        inc ypos
+        jmp moveup_draw
+
+        printDown:
+        dec ypos
+        jmp movedown_draw
+
+        printLeft:
+        inc xpos
+        jmp moveleft_draw
+
+        printRight:
+        dec xpos
+        jmp moveright_draw   
+        
+move:
+call clearScreen
+call spawnfood  
+
+copy xpos, cloneXPos
+copy ypos, cloneYPos
+loadPage altPage
+copy cloneAltPage, altPage
+copy altPage, curPage
+copy curPage, cloneAltPage
+mov partCount, 1
+mov boolCopied, 0
+call waitamillisec
+jmp readchar
+
+mov ax, 4c00h
+int 21h
+
+main    endp
+end main
